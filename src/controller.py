@@ -47,7 +47,7 @@ class Controller():
 
         if env.request == "dev":
 
-            svc_file = "/Users/hangsik/projects24/_service_account_key/ai-hangsik-71898c80c9a5.json"
+            svc_file = "/home/admin_/keys/ai-hangsik-71898c80c9a5.json"
             Controller.credentials = service_account.Credentials.from_service_account_file(
                 svc_file, 
                 scopes=['https://www.googleapis.com/auth/cloud-platform']
