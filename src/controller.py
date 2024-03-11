@@ -134,7 +134,7 @@ class Controller():
         else:
             return final_outcome
 
-    def process_simple(self, question:str, detailed:str ):
+    def process_single(self, question:str, detailed:str ):
         """
         Simplified controller to execute the RAG processes.
         Call flow:

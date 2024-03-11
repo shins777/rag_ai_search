@@ -1,4 +1,4 @@
-docker build --no-cache -t sfmi-terms:1.0 ./src/
+docker build -f ../src/Dockerfile --no-cache -t sfmi-terms:1.0 ../src/ 
 docker tag sfmi-terms:1.0 asia-northeast3-docker.pkg.dev/ai-hangsik/sfmi/sfmi-terms:1.0
 docker push asia-northeast3-docker.pkg.dev/ai-hangsik/sfmi/sfmi-terms:1.0
 gcloud run deploy sfmi-terms-run \

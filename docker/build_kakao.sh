@@ -1,4 +1,4 @@
-docker build --no-cache -t kakao-pay-terms:1.0 ./src/
+docker build -f ../src/Dockerfile --no-cache -t kakao-pay-terms:1.0 ../src/ 
 docker tag kakao-pay-terms:1.0 asia-northeast3-docker.pkg.dev/ai-hangsik/kakao-pay/kakao-pay-terms:1.0
 docker push asia-northeast3-docker.pkg.dev/ai-hangsik/kakao-pay/kakao-pay-terms:1.0
 gcloud run deploy kakao-pay-terms-run \
