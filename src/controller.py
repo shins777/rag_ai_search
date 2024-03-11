@@ -10,20 +10,27 @@ from langchain.prompts import PromptTemplate
 from langchain import globals
 
 import vertexai
-from vertexai.language_models import TextGenerationModel
 import google
 import google.oauth2.credentials
 import google.auth.transport.requests
 from google.oauth2 import service_account
-import vertexai
 
+from vertexai.language_models import TextGenerationModel
 from vertexai.preview.generative_models import GenerativeModel, Part
 import vertexai.preview.generative_models as generative_models
 
 import constant as env
 
 class Controller():
-
+    """
+    Class to perform the RAG architecture with Vertex AI Search
+    Specific flows are as follows.
+        1. Divide and verify the given complex question 
+        2. Search relavant contexts for the respective question by using Vertex AI Search
+        3. Verifying the contexts searched from Vertex AI Search
+        4. Building a final context with the question.
+        5. Return back to the results in the two ways of detailed and simple. 
+    """
     gemini_pro = None
     gemini_native = None
     bison = None
@@ -34,6 +41,23 @@ class Controller():
 
     def __init__(self):
 
+        # Check dev(Execute on local env. ) or prod(Execute on Cloud run)
+        if env.request == "dev":
+            
+            # the location of service account in Cloud Shell.
+            svc_file = "/home/admin_/keys/ai-hangsik-71898c80c9a5.json"
+            Controller.credentials = service_account.Credentials.from_service_account_file(
+                svc_file, 
+                scopes=['https://www.googleapis.com/auth/cloud-platform']
+            )
+        else:
+            # Use default auth in Cloud Run env. 
+            Controller.credentials, project_id = google.auth.default()
+
+        # Initialize Vertex AI env with the credentials. 
+        vertexai.init(project=env.project_id, location=env.region, credentials = Controller.credentials )
+
+        # Initialize Gemini Pro on Langchain API.
         Controller.gemini_pro = VertexAI( model_name = env.gemini_model,
                     project=env.project_id,
                     location=env.region,
@@ -43,19 +67,10 @@ class Controller():
                     top_k = 40
                     )
 
+        # Initialize Gemini Pro on native way using API.
         Controller.gemini_native = GenerativeModel("gemini-1.0-pro-001")
 
-        if env.request == "dev":
-
-            svc_file = "/home/admin_/keys/ai-hangsik-71898c80c9a5.json"
-            Controller.credentials = service_account.Credentials.from_service_account_file(
-                svc_file, 
-                scopes=['https://www.googleapis.com/auth/cloud-platform']
-            )
-        else:
-            Controller.credentials, project_id = google.auth.default()
-
-        vertexai.init(project=env.project_id, location=env.region, credentials = Controller.credentials )
+        # Initialize Text Bison by using native way. 
         Controller.bison = TextGenerationModel.from_pretrained(env.bison_model)
 
         print(f"[Controller][__init__] Controller.gemini_pro langchain : {Controller.gemini_pro}")
@@ -63,15 +78,20 @@ class Controller():
         print(f"[Controller][__init__] Controller.bison : {Controller.bison}")
         print(f"[Controller][__init__] Initialize Controller done!")
 
-
     def process(self, question:str, detailed:str ):
+        """
+        Controller to execute the RAG processes.
+        Call flow:
+            question_verifier --> ai_search --> context_verifier --> final_request
+        """
 
         t1 = time.time()
-
+        # Question divider for the composite question which contains several questions in a sentence.
         question_list = self.question_verifier(question)
 
         t2 = time.time()
 
+        # Parallel processing to reduce the latency for the Vertex AI Search. 
         with ThreadPoolExecutor(max_workers=10) as executor:
             searched_contexts = executor.map(self.ai_search, question_list)
 
@@ -87,9 +107,11 @@ class Controller():
         for context in contexts_list:
             new_question_list.append(context['query'])
 
+        # Context Verification for the each contex searched from the Vertex AI Search.
         with ThreadPoolExecutor(max_workers=10) as executor:
             verified_contexts = executor.map(self.context_verifier, contexts_list, new_question_list)
 
+        # Build the final context consolidated from verified contexts.
         final_contexts = ""
         for context in verified_contexts:
             if context !=None:
@@ -97,6 +119,7 @@ class Controller():
 
         t4 = time.time()
         
+        # Request a final prompt.
         final_outcome = self.final_request( question, final_contexts)
 
         t5 = time.time()
@@ -108,6 +131,57 @@ class Controller():
 
         if detailed:
             return question_list, contexts_list, final_contexts, final_outcome, elapsed_time
+        else:
+            return final_outcome
+
+    def process_simple(self, question:str, detailed:str ):
+        """
+        Simplified controller to execute the RAG processes.
+        Call flow:
+            ai_search --> context_verifier --> final_request
+        """
+
+        t1 = time.time()
+        # Search contexts from the question directly in the different way which one question is searched. 
+        contexts = self.ai_search(question )
+
+        contexts_list = contexts[0]
+        # print(contexts_list)
+
+        t2 = time.time()
+
+        new_question_list =[]
+
+        for context in contexts_list:
+            new_question_list.append(context['query'])
+
+        # Context verifier to the searched contexts.
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            verified_contexts = executor.map(self.context_verifier, contexts_list, new_question_list)
+
+        # print(verified_contexts)
+
+        # Build a final context.
+        final_contexts = ""
+        for context in verified_contexts:
+            if context !=None:
+                final_contexts = final_contexts + "\n\n[SEARCHED CONTEXT] : " + context['facts']
+
+        # print(final_contexts)
+        t3 = time.time()
+        
+        # Request a final prompt.
+        final_outcome = self.final_request( question, final_contexts)
+
+        t4 = time.time()
+
+        elapsed_time = f"Total elapsed time : {t4-t1} : ai_search[{t2-t1}], context_verifier {t3-t2}], final_request [{t4-t3}]"
+
+        print(f"[Controller][process] Final_outcome : {final_outcome}")
+        print(f"[Controller][process] Elapsed time : {elapsed_time}")
+
+        if detailed:
+            return new_question_list, contexts_list, final_contexts, final_outcome, elapsed_time
         else:
             return final_outcome
 
