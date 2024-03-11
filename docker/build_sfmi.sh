@@ -3,6 +3,7 @@ docker tag sfmi-terms:1.0 asia-northeast3-docker.pkg.dev/ai-hangsik/sfmi/sfmi-te
 docker push asia-northeast3-docker.pkg.dev/ai-hangsik/sfmi/sfmi-terms:1.0
 gcloud run deploy sfmi-terms-run \
 	--region=asia-northeast3 \
+	--project=ai-hangsik \
 	--platform managed \
 	--allow-unauthenticated \
 	--min-instances=3 \

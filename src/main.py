@@ -6,15 +6,33 @@ app = Flask(__name__)
 
 """
 Fuction descriptioin
-    - search: return string outcome for the composite question
+    - search: return string outcome for the mixed question
         : For Dialogflow CX
-    - search_detail: return several information for the composite question. 
-        : For streamlit or other apps.
-    - search_single : return string outcome for one question. 
-        : comparatively faster than other functions.
-        : For Dialogflow CX mainly or other apps.
-
+    - context: return searched relevant contexts
+        : For Dialogflow CX
 """
+
+@app.route("/response", methods=['POST'])
+def response():
+    params = request.get_json()
+    
+    question = params['question']
+    print(f" question : {question}")
+    
+    controller = Controller()
+
+    mixed_question = False
+    detailed = False
+    outcome = controller.response(question,mixed_question, detailed)
+
+    print(f"result {outcome}")
+
+    response = {
+        "result": outcome
+    }
+
+    return json.dumps(response,ensure_ascii=False)
+
 
 @app.route("/search", methods=['POST'])
 def search():
@@ -25,60 +43,16 @@ def search():
     
     controller = Controller()
 
+    mixed_question = False
     detailed = False
-    outcome = controller.process(question,detailed)
+    outcome = controller.search(question,mixed_question,detailed)
 
-    print(f"outcome {outcome}")
+    print(f"context {outcome}")
 
-    # Return final outcome only.
     response = {
         "result": outcome
     }
 
-    #return jsonify(response)
-    return json.dumps(response,ensure_ascii=False)
-
-
-@app.route("/search_detail", methods=['POST'])
-def search_detail():
-    params = request.get_json()
-    
-    question = params['question']
-    print(f" question : {question}")
-    
-    controller = Controller()
-    
-    detailed = True
-    question_list, contexts_list, final_contexts, final_outcome, elapsed_time = controller.process(question, detailed)
-
-    response = {
-        "result": "shins"
-    }
-
-    #return jsonify(response)
-    return json.dumps(response,ensure_ascii=False)
-
-
-@app.route("/search_single", methods=['POST'])
-def search_single():
-    params = request.get_json()
-    
-    question = params['question']
-    print(f" question : {question}")
-    
-    controller = Controller()
-
-    detailed = False
-    outcome = controller.process_single(question,detailed)
-
-    print(f"outcome {outcome}")
-
-    # Return final outcome only.
-    response = {
-        "result": outcome
-    }
-
-    #return jsonify(response)
     return json.dumps(response,ensure_ascii=False)
 
 if __name__ == "__main__":

@@ -64,8 +64,10 @@ with tab1 :
     # col1, col2, col3 = st.columns([1,1,1],gap="small")
 
     if tab1.button("Search!"):
+
+        mixed_question = True
         detailed = True
-        question_list, contexts_list, final_contexts, final_outcome, elapsed_time = controller.process(question, detailed)
+        question_list, contexts_list, final_contexts, final_outcome, elapsed_time = controller.response(question, mixed_question, detailed)
 
         st.session_state.past.append(question) 
         st.session_state.generated.append(final_outcome) 

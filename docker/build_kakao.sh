@@ -3,6 +3,7 @@ docker tag kakao-pay-terms:1.0 asia-northeast3-docker.pkg.dev/ai-hangsik/kakao-p
 docker push asia-northeast3-docker.pkg.dev/ai-hangsik/kakao-pay/kakao-pay-terms:1.0
 gcloud run deploy kakao-pay-terms-run \
 	--region=asia-northeast3 \
+	--project=ai-hangsik \
 	--platform managed \
 	--allow-unauthenticated \
 	--min-instances=3 \
