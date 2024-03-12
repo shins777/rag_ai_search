@@ -1,7 +1,4 @@
 
-request = "prod"
-#request = "dev"
-
 # Logging level( INFO | DEBUG )
 logging = "INFO"
 

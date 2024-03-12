@@ -24,7 +24,7 @@ import logging
 
 logging.basicConfig(
   format = '%(asctime)s:%(levelname)s:%(message)s',
-  datefmt = '%Y-%m-%d: %I:%M:%S %p',
+  #datefmt = '%Y-%m-%d: %I:%M:%S %p',
   level = logging.INFO
 )
 
@@ -48,14 +48,14 @@ class Controller():
     # Langchain verbose
     globals.set_verbose(False)
 
-    def __init__(self):
+    def __init__(self, prod:bool ):
 
         # Logger setting. 
         if env.logging == "INFO": logging.getLogger().setLevel(logging.INFO)
         else: logging.getLogger().setLevel(logging.DEBUG)
 
-        # Check dev(Execute on local env. ) or prod(Execute on Cloud run)
-        if env.request == "dev":
+        # if prod = False, use svc account.
+        if not prod:
             
             # the location of service account in Cloud Shell.
             svc_file = "/home/admin_/keys/ai-hangsik-71898c80c9a5.json"
@@ -81,97 +81,17 @@ class Controller():
         logging.info(f"[Controller][__init__] Controller.bison : {Controller.bison}")
         logging.info(f"[Controller][__init__] Initialize Controller done!")
 
-
-    def search(self, question:str, mixed_question:bool, detailed:bool ):
-        """
-        Controller to execute the RAG processes.
-
-        1. Call flow for mixed question:
-            question_splitter --> ai_search --> context_verifier --> final_request
-        2. Call flow for singuar question: 
-            ai_search --> context_verifier --> final_request
-        
-        - quesiton : user query.
-        - mixed_question : complex and composite questions 
-        - detailed : return more detailed information.
-
-        """
-
-        t1 = time.time()
-
-        if mixed_question:
-            
-            logging.info(f"[Controller][search] Mixed Question Processing Start! : {question}")
-
-            # Question split for the composite question which contains several questions in a sentence.
-            splitted_questions = self.question_splitter(question)
-
-            t2 = time.time()
-
-            # Parallel processing to reduce the latency for the Vertex AI Search. 
-            with ThreadPoolExecutor(max_workers=10) as executor:
-                searched_contexts = executor.map(self.ai_search, splitted_questions)
-
-            two_nested_list = [context for context in searched_contexts]
-            one_nested_list = list(np.concatenate(two_nested_list))            
-            contexts_list = list(np.concatenate(one_nested_list))
-            
-            logging.info(f"[Controller][search] len(contexts_list) : {len(contexts_list)}")
-            logging.debug(f"[Controller][search] contexts_list : {contexts_list}")
-
-        else:
-    
-            logging.info(f"[Controller][search] Simple Question Processing Start! : {question}")
-            
-            t2 = time.time()            
-
-            # Search contexts from the question directly in the different way which one question is searched. 
-            contexts = self.ai_search(question )
-            contexts_list = contexts[0]
-
-            logging.info(f"[Controller][search] len(contexts_list) : {len(contexts_list)}")
-            logging.debug(f"[Controller][search] contexts_list : {contexts_list}")
-
-        t3 = time.time()
-
-        question_list =[]
-
-        for context in contexts_list:
-            question_list.append(context['query'])
-
-        logging.debug(f"[Controller][search] question_list : {question_list}")
-
-        # Context Verification for the each contex searched from the Vertex AI Search.
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            verified_contexts = executor.map(self.context_verifier, contexts_list, question_list)
-
-        logging.debug(f"[Controller][search] verified_contexts : {verified_contexts}")
-
-        # Build the final context consolidated from verified contexts.
-        final_contexts = ""
-        for context in verified_contexts:
-            if context != None:
-                final_contexts = final_contexts + "\n\n[Facts] : " + context['facts']
-
-        logging.debug(f"[Controller][search] final_contexts : {final_contexts}")
-
-        t4 = time.time()
-
-        elapsed_time = f"question_splitter[{t2-t1}] : ai_search {t3-t2}] : context_verifier [{t4-t3}] : Total search time : {t4-t1} "
-        logging.info(f"[Controller][search] Elapsed time : {elapsed_time}")
-
-        logging.debug(f"[Controller][search] Final_outcome : {final_contexts}")
-
-        return final_contexts
-
-
-    def response(self, question:str, mixed_question:bool, detailed:bool ):
+    def response(self, question:str, condition:dict ):
         """
         Controller to execute the RAG processes.
         """
 
+        mixed_question = condition['mixed_question']
+        detailed_return = condition['detailed_return']
+        answer_only = condition['answer_only']
+
         t1 = time.time()
-        final_contexts = self.search(question, mixed_question, detailed)
+        final_contexts = self.search(question, condition)
 
         t2 = time.time()
         prompt = PromptTemplate.from_template("""
@@ -199,10 +119,96 @@ class Controller():
         logging.info(f"[Controller][response] Final_outcome : {final_outcome}")
         logging.info(f"[Controller][response] Elapsed time : {elapsed_time}")
 
-        if detailed:
+        if detailed_return:
             return question_list, contexts_list, final_contexts, final_outcome, elapsed_time
         else:
             return final_outcome
+
+    def search(self, question:str, condition:dict ):
+        """
+        Controller to execute the RAG processes.
+
+        1. Call flow for mixed question:
+            question_splitter --> ai_search
+        2. Call flow for singuar question: 
+            ai_search
+        
+        - quesiton : user query.
+        - mixed_question : complex and composite questions 
+        - detailed : return more detailed information.
+
+        """
+        
+        mixed_question = condition['mixed_question']
+        answer_only = condition['answer_only']
+
+        t1 = time.time()
+
+        if mixed_question:
+            
+            logging.info(f"[Controller][search] Mixed Question Processing Start! : {question}")
+
+            # Question split for the composite question which contains several questions in a sentence.
+            splitted_questions = self.question_splitter(question)
+
+            t2 = time.time()
+
+            # Parallel processing to reduce the latency for the Vertex AI Search. 
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                searched_contexts = executor.map(self.ai_search, splitted_questions, answer_only )
+
+            two_nested_list = [context for context in searched_contexts]
+            one_nested_list = list(np.concatenate(two_nested_list))            
+            contexts_list = list(np.concatenate(one_nested_list))
+            
+            logging.info(f"[Controller][search] len(contexts_list) : {len(contexts_list)}")
+            logging.debug(f"[Controller][search] contexts_list : {contexts_list}")
+
+        else:
+    
+            logging.info(f"[Controller][search] Simple Question Processing Start! : {question}")
+            
+            t2 = time.time()            
+
+            # Search contexts from the question directly in the different way which one question is searched. 
+            contexts = self.ai_search(question, answer_only )
+            contexts_list = contexts[0]
+
+            logging.info(f"[Controller][search] len(contexts_list) : {len(contexts_list)}")
+            logging.debug(f"[Controller][search] contexts_list : {contexts_list}")
+
+        t3 = time.time()
+
+        question_list =[]
+
+        for context in contexts_list:
+            question_list.append(context['query'])
+
+        logging.debug(f"[Controller][search] question_list : {question_list}")
+
+        # Context Verification for the each contex searched from the Vertex AI Search.
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            verified_contexts = executor.map(self.context_verifier, contexts_list, question_list)
+
+        logging.debug(f"[Controller][search] verified_contexts : {verified_contexts}")
+
+        # Build the final context consolidated from verified contexts.
+        final_contexts = ""
+        for context in verified_contexts:
+            if context != None:
+                final_contexts = final_contexts + "\n[Facts] : " + context['facts']
+
+        logging.debug(f"[Controller][search] final_contexts : {final_contexts}")
+
+        t4 = time.time()
+
+        elapsed_time = f"question_splitter[{t2-t1}] : ai_search {t3-t2}] : context_verifier [{t4-t3}] : Total search time : {t4-t1} "
+        logging.info(f"[Controller][search] Elapsed time : {elapsed_time}")
+
+        logging.debug(f"[Controller][search] Final_outcome : {final_contexts}")
+
+        return final_contexts
+
 
     def question_splitter(self, question :str )->list:
 
@@ -234,10 +240,10 @@ class Controller():
 
         return q_list 
 
-    def ai_search(self, question : str)->dict:
+    def ai_search(self, question : str, answer_only:bool)->dict:
 
         searched_ctx = self.retrieve_vertex_ai_search(question,env.search_url)
-        context = self.parse_discovery_results(question, searched_ctx)
+        context = self.parse_discovery_results(question, searched_ctx, answer_only)
         
         logging.info(f"[Controller][ai_search] AI Search Done! {len(context)}")
 
@@ -283,7 +289,7 @@ class Controller():
 
         return response.text
 
-    def parse_discovery_results(self, question:str, response_text:str)->dict:
+    def parse_discovery_results(self, question:str, response_text:str, answer_only:bool)->dict:
 
         """Parse response to build a conext to be sent to LLM"""
 
@@ -315,7 +321,11 @@ class Controller():
                 segments_ctx = segments_ctx.replace("<b>","").replace("</b>","").replace("&quot;","")
 
                 item['query']= question
-                item['facts']= " "+ answer_ctx + " " + segments_ctx
+
+                if answer_only: 
+                    item['facts']= " "+ answer_ctx
+                else: 
+                    item['facts']= " "+ answer_ctx + " " + segments_ctx
 
                 searched_ctx_dic.append(item)
 
