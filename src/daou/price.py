@@ -4,6 +4,7 @@ import google
 import google.oauth2.credentials
 import google.auth.transport.requests
 from google.oauth2 import service_account
+import re
 
 from vertexai.preview.generative_models import FunctionDeclaration
 from vertexai.preview.generative_models import GenerativeModel
@@ -75,14 +76,37 @@ class Calculator():
 
 
     def get_price(self, parameters):
-        product_type = parameters['product_type']
-        months = int(parameters['months'])
-        users = int(parameters['users'])
-        capacity = int(parameters['capacity'])
 
-        print("===[ 가격 계산 요청값]===")
-        print(f"제품 유형 :{product_type}")
-        print(f"사용자 유저수 :{users}")
+        if 'product_type' in parameters.keys(): product_type = parameters['product_type']
+        else: product_type = "공유형"
+
+        if 'months' in parameters.keys(): months = int(parameters['months'])
+        else: months = 12        
+
+        if 'users' in parameters.keys(): users = int(parameters['users'])
+        else: users = 100    
+
+        capacity_int=0
+        # if 'capacity' in parameters.keys(): 
+            
+        #     if type(parameters['capacity']) is int:
+        #         capacity = int(parameters['capacity'])
+
+        #     else:
+        #         print(f"capacity_str : {str(capacity_int)}")
+
+        #         capacity_str = re.sub(r'[^0-9]', '', str(parameters['capacity']))
+        #         print(f"capacity_str : {capacity_str}")
+    
+        #         capacity = int(capacity_str)
+            
+        # else: capacity = 0
+
+        print("[get_price]===[ 가격 계산 요청값]===")
+        print(f"[get_price]제품 유형 :{product_type}")
+        print(f"[get_price]개월 수  :{months}")
+        print(f"[get_price]사용자 유저수 :{users}")
+        print(f"[get_price]용량추가 :{capacity}")
 
         max_users_range = [100,200,200]
         excl_users_range =[100,300,500]
@@ -204,6 +228,7 @@ class Calculator():
             아래 Question 에 제시된 정보를 기준으로 1개월 기준 가격과 함께 해당 계약기간에 따른 가격 알려주세요.
 
             만일 Question에 계산을 위해서 사용자수, 제품타입, 계약기간, 용량추가에 대해서 참조할 값이 없다면 아래 디폴트 값을 참조하고 계산해주세요.
+            그리고 디폴트 값을 반드시 알려주세요.
 
             [디폴트 값]
             * 사용자수(users) : 550
@@ -235,6 +260,7 @@ class Calculator():
 
             # Directly extract arguments from function call
             args = {key: value for key, value in function_call.args.items()}
+            print(args)
 
             # Call the function with the extracted arguments
             if args:
@@ -253,7 +279,7 @@ class Calculator():
             else:
                 print("가격 계산을 위한 적합한 정보가 없습니다.")
         else:
-            print("\n 좀더 가격계산을 위한 자세한 정보를 주세요.(제품종류, 유저수, 계약개월수, 용량추가)", response.text)
+            print("\n 좀더 정확한 가격계산을 위한 자세한 정보를 주세요.(제품종류, 유저수, 계약개월수, 용량추가)", response.text)
 
             return response.text, None
 
