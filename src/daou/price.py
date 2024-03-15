@@ -87,20 +87,18 @@ class Calculator():
         else: users = 100    
 
         capacity_int=0
-        # if 'capacity' in parameters.keys(): 
-            
-        #     if type(parameters['capacity']) is int:
-        #         capacity = int(parameters['capacity'])
+        if 'capacity' in parameters.keys(): 
+            if isinstance(parameters['capacity'], int) or isinstance(parameters['capacity'], float):
+                capacity = int(parameters['capacity'])
+            else:
+                print(f"capacity_str : {str(capacity_int)}")
 
-        #     else:
-        #         print(f"capacity_str : {str(capacity_int)}")
-
-        #         capacity_str = re.sub(r'[^0-9]', '', str(parameters['capacity']))
-        #         print(f"capacity_str : {capacity_str}")
+                capacity_str = re.sub(r'[^0-9]', '', str(parameters['capacity']))
+                print(f"capacity_str : {capacity_str}")
     
-        #         capacity = int(capacity_str)
+                capacity = int(capacity_str)
             
-        # else: capacity = 0
+        else: capacity = 0
 
         print("[get_price]===[ 가격 계산 요청값]===")
         print(f"[get_price]제품 유형 :{product_type}")
