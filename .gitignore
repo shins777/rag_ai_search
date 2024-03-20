@@ -4,10 +4,9 @@ __pycache__/
 *$py.class
 
 
-docker
-unit_test
-daou
 
+=======
+>>>>>>> dc2ad5f7fefceb54ea2e6da677ad90f61e8c7059
 # C extensions
 *.so
 
