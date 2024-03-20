@@ -4,10 +4,6 @@ __pycache__/
 *$py.class
 
 
-docker
-unit_test
-
-
 # C extensions
 *.so
 
