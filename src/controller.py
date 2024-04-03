@@ -91,7 +91,8 @@ class Controller():
         answer_only = condition['answer_only']
 
         t1 = time.time()
-        final_contexts = self.search(question, condition)
+        
+        splitted_questions, contexts_list, final_contexts = self.search(question, condition)
 
         t2 = time.time()
         prompt = PromptTemplate.from_template("""
@@ -120,7 +121,7 @@ class Controller():
         logging.info(f"[Controller][response] Elapsed time : {elapsed_time}")
 
         if detailed_return:
-            return question_list, contexts_list, final_contexts, final_outcome, elapsed_time
+            return splitted_questions, contexts_list, final_contexts, final_outcome, elapsed_time
         else:
             return final_outcome
 
@@ -142,6 +143,10 @@ class Controller():
         mixed_question = condition['mixed_question']
         answer_only = condition['answer_only']
 
+        splitted_questions = None
+        contexts_list = None
+        final_contexts = None
+
         t1 = time.time()
 
         if mixed_question:
@@ -155,7 +160,7 @@ class Controller():
 
             # Parallel processing to reduce the latency for the Vertex AI Search. 
             with ThreadPoolExecutor(max_workers=10) as executor:
-                searched_contexts = executor.map(self.ai_search, splitted_questions, answer_only )
+                searched_contexts = executor.map(self.ai_search, splitted_questions, [answer_only*len(splitted_questions)] )
 
             two_nested_list = [context for context in searched_contexts]
             one_nested_list = list(np.concatenate(two_nested_list))            
@@ -207,7 +212,7 @@ class Controller():
 
         logging.debug(f"[Controller][search] Final_outcome : {final_contexts}")
 
-        return final_contexts
+        return splitted_questions, contexts_list, final_contexts
 
 
     def question_splitter(self, question :str )->list:
@@ -285,7 +290,7 @@ class Controller():
         response = requests.post(search_url,headers=headers, data=data)
 
         logging.info(f"[Controller][retrieve_vertex_ai_search] Response len : {len(response.text)}")
-        logging.debug(f"[Controller][retrieve_vertex_ai_search] Response len : {response.text}")
+        logging.debug(f"[Controller][retrieve_vertex_ai_search] Response : {response.text}")
 
         return response.text
 
@@ -317,8 +322,8 @@ class Controller():
                     for segment in derivedStructData['extractive_segments']:
                         segments_ctx = segments_ctx + segment['content']
 
-                answer_ctx = answer_ctx.replace("<b>","").replace("</b>","").replace("&quot;","")
-                segments_ctx = segments_ctx.replace("<b>","").replace("</b>","").replace("&quot;","")
+                answer_ctx = answer_ctx.replace("<b>","").replace("</b>","").replace("&quot;","").replace("\"","'")
+                segments_ctx = segments_ctx.replace("<b>","").replace("</b>","").replace("&quot;","").replace("\"","'")
 
                 item['query']= question
 

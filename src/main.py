@@ -82,7 +82,7 @@ def search_segments():
         "answer_only" : False   # Answers + Segments
     }
 
-    outcome = controller.search( question, condition )
+    outcome = controller.response( question, condition )
 
     print(f"context {outcome}")
 
@@ -109,7 +109,7 @@ def search_answers():
         "answer_only" : True  # Only answers
     }
 
-    outcome = controller.search( question, condition )
+    outcome = controller.response( question, condition )
 
     print(f"context {outcome}")
 
@@ -119,6 +119,36 @@ def search_answers():
 
     return json.dumps(response,ensure_ascii=False)
 
+
+@app.route("/search_detailed", methods=['POST'])
+def search_detailed():
+
+    params = request.get_json()
+    
+    question = params['question']
+    print(f" question : {question}")
+
+    controller = Controller(prod)
+
+    condition = {
+        "mixed_question" : True,
+        "detailed_return" : True,
+        "answer_only" : False
+    }
+
+    question_list, contexts_list, final_contexts, final_outcome, elapsed_time = controller.response(question, condition)
+
+    print(f"context {final_outcome}")
+
+    response = {
+        "question_list": question_list,
+        "contexts_list": contexts_list,
+        "final_contexts": final_contexts,
+        "final_outcome": final_outcome,
+        "elapsed_time": elapsed_time
+    }
+
+    return json.dumps(response,ensure_ascii=False)
 
 
 @app.route("/get_price", methods=['POST'])
