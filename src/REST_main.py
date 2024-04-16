@@ -16,8 +16,8 @@ Fuction descriptioin
 # Production env.
 prod = True
 
-@app.route("/response_segments", methods=['POST'])
-def response_segments():
+@app.route("/search", methods=['POST'])
+def search():
     params = request.get_json()
     
     question = params['question']
@@ -28,7 +28,6 @@ def response_segments():
     condition = {
         "mixed_question" : False,
         "detailed_return" : False,
-        "answer_only" : False # Answers + segments
     }
 
     outcome = controller.response( question, condition )

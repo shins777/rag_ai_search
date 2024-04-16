@@ -44,10 +44,10 @@ class Controller():
     gemini_model = None
     credentials = None
 
-    project_id = None
-    region = None
+    project_id = env.project_id
+    region = env.region
     q_type = None
-    search_url = None
+    search_url = env.search_url
     num_search = 0
 
     # Langchain verbose
