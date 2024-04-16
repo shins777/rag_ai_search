@@ -4,7 +4,8 @@ import requests
 import json
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
-
+from operator import is_not
+from functools import partial
 
 from langchain_google_vertexai.llms import VertexAI
 from langchain.prompts import PromptTemplate
@@ -32,21 +33,25 @@ import constant as env
 
 class Controller():
     """
-    Class to perform the RAG architecture with Vertex AI Search
-    Specific flows are as follows.
-        1. Divide and verify the given complex question 
-        2. Search relavant contexts for the respective question by using Vertex AI Search
-        3. Verifying the contexts searched from Vertex AI Search
-        4. Building a final context with the question.
-        5. Return back to the results in the two ways of detailed and simple. 
+    Vertex AI 서치 후에 결과 처리 Flow.
+    
+        1. 복잡한 질문에 대해서 여러개로 분류한다. 
+        2. 각각에 질문에 대해서 Vertex AI Search를 통해서 검색한다.
+        3. 검색된 결과를 Verify 과정을 통해서 필요한 context만 정리한다.
+        4. Verified 된 Context 만 Final context 구성해서 최종 결과를 LLM에 요청한다. 
     """
-    gemini_pro = None
-    gemini_native = None
-    bison = None
+    
+    gemini_model = None
     credentials = None
 
+    project_id = None
+    region = None
+    q_type = None
+    search_url = None
+    num_search = 0
+
     # Langchain verbose
-    globals.set_verbose(False)
+    # globals.set_verbose(False)
 
     def __init__(self, prod:bool ):
 
@@ -58,9 +63,8 @@ class Controller():
         if not prod:
             
             # the location of service account in Cloud Shell.
-            svc_file = "/home/admin_/keys/ai-hangsik-71898c80c9a5.json"
             Controller.credentials = service_account.Credentials.from_service_account_file(
-                svc_file, 
+                env.svc_acct_file, 
                 scopes=['https://www.googleapis.com/auth/cloud-platform']
             )
         else:
@@ -68,17 +72,10 @@ class Controller():
             Controller.credentials, project_id = google.auth.default()
 
         # Initialize Vertex AI env with the credentials. 
-        vertexai.init(project=env.project_id, location=env.region, credentials = Controller.credentials )
+        vertexai.init(project=Controller.project_id, location=Controller.region, credentials = Controller.credentials )
 
-        # Initialize Gemini Pro on native way using API.
-        Controller.gemini_native = GenerativeModel(env.gemini_model)
-
-        # Initialize Text Bison by using native way. 
-        Controller.bison = TextGenerationModel.from_pretrained(env.bison_model)
-
-        logging.info(f"[Controller][__init__] Controller.gemini_pro langchain : {Controller.gemini_pro}")
-        logging.info(f"[Controller][__init__] Controller.gemini_pro native : {Controller.gemini_native}")
-        logging.info(f"[Controller][__init__] Controller.bison : {Controller.bison}")
+        logging.info(f"[Controller][__init__] Controller.credentials  : {Controller.credentials}")
+        logging.info(f"[Controller][__init__] Controller.gemini_model  : {Controller.gemini_model}")
         logging.info(f"[Controller][__init__] Initialize Controller done!")
 
     def response(self, question:str, condition:dict ):
@@ -86,42 +83,47 @@ class Controller():
         Controller to execute the RAG processes.
         """
 
-        mixed_question = condition['mixed_question']
-        detailed_return = condition['detailed_return']
-        answer_only = condition['answer_only']
+        logging.info(f"[Controller][response] Start response : {condition}")
+
+        splitted_questions, contexts_list, verified_context_list, final_contexts, execution_stat = self.search(question, condition)
 
         t1 = time.time()
+
+        final_prompt = f"""
         
-        splitted_questions, contexts_list, final_contexts = self.search(question, condition)
+        당신은 지식을 검색해서 상담해주는 AI 어시스턴트입니다.
+        아래 <Question> 에 대한 답변을 할 때 반드시 <Context> 내에 있는 내용만을 참고해서 단계적으로 추론 후 요약해서 답변해주세요.
+        답변할 때 결론을 먼저 언급하고, 그 뒤에 이유를 최대한 상세하게 정리해서 근거를 가지고 답해주세요. 
+        답변 포맷은 아래와 같이 해주세요.
+        1. 답변 요약
+        2. 이유 또는 참조 근거
+        3. 기타 고려사항
+    
+        <Context> 
+            {final_contexts} 
+        
+        </Context>
+        
+        <Question> 
+            {question} 
+        </Question>
+
+        """
+
+        # gemini is more concise to answer as of Mar 12, 2024.
+        final_outcome = self.call_gemini(final_prompt, env.gemini_1_5_pro)
+
+        logging.debug(f"[Controller][response] final_prompt : {final_prompt}")
 
         t2 = time.time()
-        prompt = PromptTemplate.from_template("""
-        당신은 지식을 검색해서 상담해주는 AI 어시스턴트입니다.
-        아래 Question 에 대해서 반드시 [Facts]들에 있는 내용만을 참고해서 단계적으로 추론 후 요약해서 답변해주세요.
-        답변은 결론을 먼저 언급하고, 그 뒤에 이유를 최대한 상세하게 정리해서 답해주세요.
-        {context}
-        Question : {question}
-        """)
 
-        prompt = prompt.format(context=final_contexts, question=question)
+        execution_stat['llm_request'] = round((t2-t1), 3)
 
-        # text bison is more detail to answer as of Mar 12, 2024.
-        #outcome = self.call_bison(prompt)
-        
-        # gemini is more concise to answer as of Mar 12, 2024.
-        final_outcome = self.call_gemini(prompt)
+        logging.debug(f"[Controller][response] Final_outcome : {final_outcome}")
+        logging.info(f"[Controller][response] Elapsed time : {execution_stat}")
 
-        logging.debug(f"[Controller][response] Prompt : {prompt}")
-
-        t3 = time.time()
-
-        elapsed_time = f"Search [{t2-t1} : LLM Request[{t3-t2}] : Total elapsed time : [{t3-t1}] :  "
-
-        logging.info(f"[Controller][response] Final_outcome : {final_outcome}")
-        logging.info(f"[Controller][response] Elapsed time : {elapsed_time}")
-
-        if detailed_return:
-            return splitted_questions, contexts_list, final_contexts, final_outcome, elapsed_time
+        if condition['detailed_return']:
+            return splitted_questions, contexts_list, verified_context_list, final_prompt, final_outcome, execution_stat
         else:
             return final_outcome
 
@@ -130,9 +132,9 @@ class Controller():
         Controller to execute the RAG processes.
 
         1. Call flow for mixed question:
-            question_splitter --> ai_search
+            question_splitter --> search_chunks
         2. Call flow for singuar question: 
-            ai_search
+            search_chunks
         
         - quesiton : user query.
         - mixed_question : complex and composite questions 
@@ -141,10 +143,8 @@ class Controller():
         """
         
         mixed_question = condition['mixed_question']
-        answer_only = condition['answer_only']
 
         splitted_questions = None
-        contexts_list = None
         final_contexts = None
 
         t1 = time.time()
@@ -155,19 +155,19 @@ class Controller():
 
             # Question split for the composite question which contains several questions in a sentence.
             splitted_questions = self.question_splitter(question)
+            # 원래의 질문도 추가함.
+            splitted_questions.append(question)
 
             t2 = time.time()
 
             # Parallel processing to reduce the latency for the Vertex AI Search. 
             with ThreadPoolExecutor(max_workers=10) as executor:
-                searched_contexts = executor.map(self.ai_search, splitted_questions, [answer_only*len(splitted_questions)] )
+                searched_contexts = executor.map(self.search_chunks, splitted_questions )
 
-            two_nested_list = [context for context in searched_contexts]
-            one_nested_list = list(np.concatenate(two_nested_list))            
-            contexts_list = list(np.concatenate(one_nested_list))
-            
-            logging.info(f"[Controller][search] len(contexts_list) : {len(contexts_list)}")
-            logging.debug(f"[Controller][search] contexts_list : {contexts_list}")
+            searched_list = [context for context in searched_contexts]
+
+            logging.info(f"[Controller][search] len(searched_list) : {len(searched_list)}")
+            logging.debug(f"[Controller][search] searched_list : {searched_list}")
 
         else:
     
@@ -176,62 +176,83 @@ class Controller():
             t2 = time.time()            
 
             # Search contexts from the question directly in the different way which one question is searched. 
-            contexts = self.ai_search(question, answer_only )
-            contexts_list = contexts[0]
+            contexts = self.search_chunks(question )
+            searched_list = [contexts]
 
-            logging.info(f"[Controller][search] len(contexts_list) : {len(contexts_list)}")
-            logging.debug(f"[Controller][search] contexts_list : {contexts_list}")
+            logging.info(f"[Controller][search] len(searched_list) : {len(searched_list)}")
+            logging.debug(f"[Controller][search] searched_list : {searched_list}")
 
         t3 = time.time()
 
         question_list =[]
 
-        for context in contexts_list:
-            question_list.append(context['query'])
+        for context in searched_list:
+            question_list.append(context['result']['question'])
 
         logging.debug(f"[Controller][search] question_list : {question_list}")
+        logging.debug(f"[Controller][search] searched_list : {searched_list}")
 
-        # Context Verification for the each contex searched from the Vertex AI Search.
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            verified_contexts = executor.map(self.context_verifier, contexts_list, question_list)
+        # 만일 복합 질문 형태가 아니면 검색결과를 그대로 사용.
+        if not mixed_question:
+            verified_context_list = searched_list
+        # 복합 질문인 경우에는 Verification 과정을 처리.
+        else:
+            # Context Verification for the each contex searched from the Vertex AI Search.
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                verified_contexts = executor.map(self.context_verifier, searched_list, question_list)
 
-        logging.debug(f"[Controller][search] verified_contexts : {verified_contexts}")
+            verified_context_list_org = [context for context in verified_contexts]
+            verified_context_list = list(filter(partial(is_not, None), verified_context_list_org))
+
+        logging.debug(f"[Controller][search] verified_contexts : {verified_context_list}")
 
         # Build the final context consolidated from verified contexts.
         final_contexts = ""
-        for context in verified_contexts:
+        for context in verified_context_list:
             if context != None:
-                final_contexts = final_contexts + "\n[Facts] : " + context['facts']
+                final_contexts = final_contexts + "\n[content] : " + context['result']['content']
 
         logging.debug(f"[Controller][search] final_contexts : {final_contexts}")
 
         t4 = time.time()
 
-        elapsed_time = f"question_splitter[{t2-t1}] : ai_search {t3-t2}] : context_verifier [{t4-t3}] : Total search time : {t4-t1} "
-        logging.info(f"[Controller][search] Elapsed time : {elapsed_time}")
+        execution_stat = {}
+        execution_stat['time_question_splitter'] = round((t2-t1), 3)
+        execution_stat['time_ai_search'] = round((t3-t2), 3)
+        execution_stat['time_context_verifier'] = round((t4-t3), 3)
+
+        execution_stat['num_total_searched'] = len(searched_list)
+        execution_stat['num_verified_contexts'] = len(verified_context_list)
+
+        #elapsed_time = f"question_splitter[{t2-t1}] : ai_search {t3-t2}] : context_verifier [{t4-t3}] : Total search time : {t4-t1} "
+        logging.info(f"[Controller][search] Elapsed time : {execution_stat}")
 
         logging.debug(f"[Controller][search] Final_outcome : {final_contexts}")
 
-        return splitted_questions, contexts_list, final_contexts
+        return splitted_questions, searched_list, verified_context_list, final_contexts, execution_stat
 
 
     def question_splitter(self, question :str )->list:
 
         prompt = PromptTemplate.from_template("""
             당신을 정확한 검색을 위한 질문 생성기 입니다.
-            아래 [Question]에 답하기 위한 사실을 검색할 목적으로, [Question]을 기반으로 2가지 질문을 만들어 주세요.
-            답변 형태는 반드시 아래와 같은 파이썬 리스트 포맷으로 답해주세요.
+            아래 [Question]에 답하기 위한 사실을 검색할 목적으로, [Question]을 기반으로 3가지 질문을 만들어 주세요.
+            답변 형태는 반드시 아래와 같은 리스트 포맷으로 답해주세요.
                                               
             [Question] : {question}
-            답변 포맷 : ["질문1", "질문2"]
+            답변 포맷 : ["질문1", "질문2", "질문3"]
 
         """)
 
         prompt = prompt.format(question=question)
 
-        questions = self.call_gemini(prompt)
+        questions = self.call_gemini(prompt, env.gemini_1_5_pro)
 
-        num_q = 2
+        # 질문개수를 1차적으로 2개로 셋팅함.
+        num_q = 3
+        
+        print(f"questions : {questions}")
+
         try:
             q_list = ast.literal_eval(questions)
 
@@ -245,16 +266,10 @@ class Controller():
 
         return q_list 
 
-    def ai_search(self, question : str, answer_only:bool)->dict:
+    # https://github.com/shins777/google_gen_ai_sample/blob/main/notebook/03.grounding/ai_search/Vertex%20AI%20Search%20-%20Chunk%20REST.ipynb
+    def search_chunks(self, question:str)->str:
 
-        searched_ctx = self.retrieve_vertex_ai_search(question,env.search_url)
-        context = self.parse_discovery_results(question, searched_ctx, answer_only)
-        
-        logging.info(f"[Controller][ai_search] AI Search Done! {len(context)}")
-
-        return context
-
-    def retrieve_vertex_ai_search(self, question:str, search_url:str )->str:
+        logging.info(f"[Controller][search_chunks] Search Start! : {question}")
 
         request = google.auth.transport.requests.Request()
         Controller.credentials.refresh(request)
@@ -269,77 +284,60 @@ class Controller():
             "page_size": str(env.num_search),
             "offset": 0,
             "contentSearchSpec":{
-                # "snippetSpec": {"maxSnippetCount": 0,
-                #                 },
-
-                # INFO : Summary needs another LLM call so that that makes more latency than normal.
-                # "summarySpec": { "summaryResultCount": 5,
-                #                  "includeCitations": False},
-                "extractiveContentSpec":{
-                    "maxExtractiveAnswerCount": str(env.maxExtractiveAnswerCount),
-                    "maxExtractiveSegmentCount": str(env.maxExtractiveSegmentCount),
-                    "num_previous_segments" : str(env.num_previous_segments),
-                    "num_next_segments" : str(env.num_next_segments),
-                    }
+                    "searchResultMode" : "CHUNKS",
+                    "chunkSpec" : {
+                        "numPreviousChunks" : 1,
+                        "numNextChunks" : 1
+                    }              
             },
-            # "queryExpansionSpec":{"condition":"AUTO"}
         }
 
         data = json.dumps(query_dic)
         data=data.encode("utf8")
-        response = requests.post(search_url,headers=headers, data=data)
+        response = requests.post(Controller.search_url,headers=headers, data=data)
 
-        logging.info(f"[Controller][retrieve_vertex_ai_search] Response len : {len(response.text)}")
-        logging.debug(f"[Controller][retrieve_vertex_ai_search] Response : {response.text}")
+        logging.info(f"[Controller][search_chunks] Search Response len : {len(response.text)}")
+        logging.debug(f"[Controller][search_chunks] Search Response chunks : {response.text}")
+        logging.info(f"[Controller][search_chunks] Search End! : {question}")
 
-        return response.text
+        # Start to parse the searched chunks
+        dict_results = json.loads(response.text)
 
-    def parse_discovery_results(self, question:str, response_text:str, answer_only:bool)->dict:
-
-        """Parse response to build a conext to be sent to LLM"""
-
-        dict_results = json.loads(response_text)
-
-        serched_documents = []
-        searched_ctx_dic = []
+        search_results = {}
 
         if dict_results.get('results'):
+
             for result in dict_results['results']:
-                answer_ctx =""
-                segments_ctx =""
+
                 item = {}
-                derivedStructData = result['document']['derivedStructData']
 
-                #reference = derivedStructData['link']
-                #reference__name = reference.rsplit('/', 1)[1].strip()
-                #reference_link = reference.replace("gs://","https://storage.cloud.google.com/")
+                chunk = result['chunk']
 
-                if derivedStructData['extractive_answers']:
-                    for answer in derivedStructData['extractive_answers']:
-                        answer_ctx = answer_ctx + answer['content']
+                item['title'] = chunk['documentMetadata']['title']
+                item['uri'] = chunk['documentMetadata']['uri']
+                item['pageSpan'] = f"{chunk['pageSpan']['pageStart']} ~ {chunk['pageSpan']['pageEnd']}"
+                item['content'] = chunk['content']
+                item['question'] = question
 
-                if derivedStructData.get('extractive_segments'):
-                    for segment in derivedStructData['extractive_segments']:
-                        segments_ctx = segments_ctx + segment['content']
+                if 'chunkMetadata' in chunk:
+                    
+                    add_chunks = chunk['chunkMetadata']
+                    if 'previousChunks' in add_chunks:
+                        # chunk 는 현재 Contents에 가까운것 부터 나타남.
+                        p_chunks = chunk['chunkMetadata']['previousChunks']
+                        if p_chunks:
+                            for p_chunk in p_chunks:
+                                item['content'] = p_chunk['content'] +"\n"+ item['content']
 
-                answer_ctx = answer_ctx.replace("<b>","").replace("</b>","").replace("&quot;","").replace("\"","'")
-                segments_ctx = segments_ctx.replace("<b>","").replace("</b>","").replace("&quot;","").replace("\"","'")
+                    if 'nextChunks' in add_chunks:
+                        n_chunks = chunk['chunkMetadata']['nextChunks']
+                        if n_chunks:
+                            for n_chunk in n_chunks:
+                                item['content'] = item['content'] +"\n"+ n_chunk['content']
 
-                item['query']= question
+                search_results['result'] = item
 
-                if answer_only: 
-                    item['facts']= " "+ answer_ctx
-                else: 
-                    item['facts']= " "+ answer_ctx + " " + segments_ctx
-
-                searched_ctx_dic.append(item)
-
-            serched_documents.append(searched_ctx_dic)
-
-        logging.info(f"[Controller][parse_discovery_results] serched_documents len : {len(serched_documents)}")
-        logging.debug(f"[Controller][parse_discovery_results] serched_documents len : {serched_documents}")
-
-        return serched_documents
+        return search_results
 
     def context_verifier(self, context : str, question : str)->str:
 
@@ -349,57 +347,49 @@ class Controller():
         """
 
         prompt = PromptTemplate.from_template("""
-            당신은 아래 Context가 Question과 관련되어 있는지 확인하는 AI 입니다.
-            아래 [Context]의 일부 내용이 아래 [Question]과 조금이라도 관련이 있으면 "Yes" 라고 말하세요.
-            만일, 아래 [Context]의 내용이 아래 [Question]과 전혀 관련이 없으면 "No"라고 말하세요.
+            당신은 <Question>의 내용을 바탕으로 <Context>의 내용이 관련이 있는 여부를 판단하는 AI Agent 입니다. 
+            아래 <Context>의 내용이 아래 <Question>과 관련이 있으면 "Yes" 라고 답하세요.
+            만일, 아래 <Context>의 내용이 아래 <Question>과 관련이 없으면 "No"라고 답하세요.
 
-            [Context] : {context}
-            [Question] : {question}        
+            <Context>
+                {context}
+            </Context>
+
+            <Question>
+                {question}        
+            </Question>
                                               
         """)
 
-        prompt = prompt.format(context=context,
+        prompt = prompt.format(context=context['result']['content'],
                             question=question)
 
-        result = self.call_gemini(prompt)
+        result = self.call_gemini(prompt, env.gemini_1_5_pro)
 
-        logging.info(f"[Controller][context_verifier] Question : {question}, Verification Result : {result}")
+        logging.info(f"[Controller][context_verifier] Question : {question}, Verification Result :{result}")
 
         # if the context is relevant to the question, return the context. 
-        if result == "Yes":
+        
+        if result.strip() == "Yes":
             return context
 
-    def call_bison(self, prompt):
+    def call_gemini(self, prompt, gemini_model):
         
-        parameters = {
-            "candidate_count": 2,
-            "max_output_tokens": 2048,
-            "temperature": 0.2,
-            "top_p": 1
-        }
-        responses = Controller.bison.predict(
-            prompt=prompt,
-            **parameters
-        )
+        gemini_model = GenerativeModel(gemini_model)
 
-        logging.debug(f"[Controller][call_bison] Final response Len {len(responses.text)}")
-
-        return responses.text    
-
-    def call_gemini(self, prompt):
-        
         generation_config = {
             "candidate_count": 1,
-            "max_output_tokens": 2048,
-            "temperature": 0.2,
-            "top_p": 1
+            "max_output_tokens": 8092,
+            "temperature": 0.5,
+            "top_p": 1,
+            "top_k": 40
         }
-        responses = Controller.gemini_native.generate_content(
+        responses = gemini_model.generate_content(
             [prompt],
             generation_config = generation_config
         ) 
 
-        logging.debug(f"[Controller][call_bison] Final response Len {len(responses.text)}")
+        logging.debug(f"[Controller][call_gemini] Final response Len {len(responses.text)}")
 
         return responses.text            
 
