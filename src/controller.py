@@ -266,7 +266,8 @@ class Controller():
         num_q = 3
         
         print(f"questions : {questions}")
-
+        q_list = None
+        
         try:
             q_list = ast.literal_eval(questions)
 
