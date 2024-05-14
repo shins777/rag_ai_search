@@ -266,7 +266,7 @@ class Controller():
         num_q = 3
         
         print(f"questions : {questions}")
-        q_list = None
+        q_list = []
         
         try:
             q_list = ast.literal_eval(questions)
